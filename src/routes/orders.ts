@@ -194,7 +194,7 @@ ordersRoute.get(
       .where(
         and(
           eq(orders.scheduleDate, date),
-          sql`${orders.status} NOT IN ('cancelled', 'rejected')`
+          sql`${orders.status} NOT IN ('cancelled')`
         )
       );
 

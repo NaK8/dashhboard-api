@@ -24,7 +24,7 @@ app.use("*", timing());
 app.use(
 	"*",
 	cors({
-		origin: process.env.DASHBOARD_URL || "http://localhost:5173",
+		origin: process.env.DASHBOARD_URL || "https://dashboard.wellhealthlabs.com",
 		allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		allowHeaders: ["Content-Type", "Authorization"],
 		credentials: true,
@@ -77,14 +77,7 @@ app.onError((err, c) => {
 
 // ─── Start Server ────────────────────────────────────────
 
-const port = parseInt(process.env.PORT || "3000");
-
-console.log(`
-╔══════════════════════════════════════════╗
-║     Medical Dashboard API                ║
-║     Running on http://localhost:${port}      ║
-╚══════════════════════════════════════════╝
-`);
+const port = parseInt(process.env.PORT || "3001");
 
 export default {
 	port,

@@ -21,12 +21,8 @@ export const staffRoleEnum = pgEnum("staff_role", ["admin", "staff"]);
 
 export const orderStatusEnum = pgEnum("order_status", [
   "pending",       // just submitted from WordPress
-  "confirmed",     // staff confirmed the appointment
-  "in_progress",   // patient is at the lab / tests running
   "completed",     // all tests done, results ready
-  "rejected",      // order rejected (invalid info, etc.)
-  "cancelled",     // patient cancelled
-  "no_show",       // patient didn't show up
+  "cancelled",     // patient or admin cancelled
 ]);
 
 export const testCategoryEnum = pgEnum("test_category", [
@@ -89,15 +85,19 @@ export const orders = pgTable(
 
     // ── Patient Information ──────────────────────────────
     patientName: varchar("patient_name", { length: 255 }).notNull(),
-    patientDob: date("patient_dob").notNull(),
-    patientPhone: varchar("patient_phone", { length: 50 }).notNull(),
+    patientDob: date("patient_dob"),
+    patientPhone: varchar("patient_phone", { length: 50 }),
     patientSecondaryPhone: varchar("patient_secondary_phone", { length: 50 }),
-    patientAddress: text("patient_address").notNull(),
+    patientAddress: text("patient_address"),
+
+    // ── Physician / Clinic ───────────────────────────────
+    physicianName: varchar("physician_name", { length: 255 }),
+    clinicAddress: text("clinic_address"),
 
     // ── Scheduling ──────────────────────────────────────
     // 20-min slots: "09:00", "09:20", "09:40" ... "16:40"
-    scheduleDate: date("schedule_date").notNull(),
-    scheduleTime: varchar("schedule_time", { length: 10 }).notNull(),
+    scheduleDate: date("schedule_date"),
+    scheduleTime: varchar("schedule_time", { length: 10 }),
 
     // ── Order Metadata ──────────────────────────────────
     dateOfOrder: date("date_of_order").notNull(),

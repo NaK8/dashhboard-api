@@ -40,12 +40,8 @@ export const VALID_TIME_SLOTS = [
 
 export const ORDER_STATUSES = [
   "pending",
-  "confirmed",
-  "in_progress",
   "completed",
-  "rejected",
   "cancelled",
-  "no_show",
 ] as const;
 
 export const TEST_CATEGORIES = [
@@ -85,13 +81,15 @@ export const orderFilterSchema = z.object({
 });
 
 // ─── Webhook Payload (from Metform) ──────────────────────
-// Flexible because Metform field names depend on how the form was built.
-// We extract known fields and keep the rest as raw data.
+// Metform wraps form fields inside an "entries" object.
+// Top-level keys like form_id, entry_id are also present.
 
 export const webhookPayloadSchema = z.object({
+  entries: z.record(z.string(), z.any()).optional(),
   form_id: z.union([z.string(), z.number()]).optional(),
   form_name: z.string().optional(),
   entry_id: z.union([z.string(), z.number()]).optional(),
+  file_uploads: z.any().optional(),
   webhook_secret: z.string().optional(),
 }).passthrough();
 

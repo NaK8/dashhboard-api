@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, ilike } from "drizzle-orm";
+import { eq, ilike, and, sql } from "drizzle-orm";
 import { db } from "../db";
 import { orders, orderItems, testCatalog, webhookLogs } from "../db/schema";
 import { webhookPayloadSchema } from "../lib/types";
@@ -66,7 +66,12 @@ webhook.post("/metform", async (c) => {
     }
 
     const data = parsed.data;
-    const { form_id, form_name, entry_id, webhook_secret, ...formFields } = data;
+    const { entries, form_id, form_name, entry_id, file_uploads, webhook_secret, ...extraFields } = data;
+
+    // ── Unwrap entries (Metform wraps all form fields inside entries) ──
+    const formFields: Record<string, unknown> = entries
+      ? { ...entries, ...extraFields }
+      : { ...extraFields };
 
     // ── Extract structured fields ─────────────────────────
     const patient = extractPatientFields(formFields);
@@ -85,15 +90,37 @@ webhook.post("/metform", async (c) => {
       price: string;
     }> = [];
 
-    for (const testName of patient.testNames) {
-      // Try exact match first, then fuzzy
+    for (const rawTestName of patient.testNames) {
+      // 1. Parse "Name-$Price" format (e.g., "drug-screening-and-confirmation-$140")
+      const priceMatch = rawTestName.match(/^(.*)-\$(\d+)$/);
+      const namePart = priceMatch ? priceMatch[1].replace(/-/g, " ") : rawTestName;
+      const pricePart = priceMatch ? priceMatch[2] : null;
+
+      // 2. Try Exact Match (on namePart)
       let catalogTest = await db.query.testCatalog.findFirst({
-        where: eq(testCatalog.testName, testName),
+        where: eq(testCatalog.testName, namePart),
       });
 
-      if (!catalogTest) {
+      // 3. Try Category + Price Match (if we have both)
+      if (!catalogTest && pricePart && patient.category) {
+        // Normalize category: "drug-testing" -> "drug_testing" to match Enum
+        const normalizedCategory = patient.category.replace(/-/g, "_");
+
         catalogTest = await db.query.testCatalog.findFirst({
-          where: ilike(testCatalog.testName, `%${testName}%`),
+          where: and(
+            eq(testCatalog.category, normalizedCategory as any),
+            // Compare price (cast DB numeric to simple string comparison handling .00)
+             sql`${testCatalog.price}::numeric = ${pricePart}::numeric`
+          ),
+        });
+      }
+
+      // 4. Try Fuzzy Match (fallback)
+      if (!catalogTest) {
+        // Clean up formatting: "drug-screening-and-confirmation" -> "drug screening and confirmation"
+        const cleanedName = namePart.replace(/-/g, " ");
+        catalogTest = await db.query.testCatalog.findFirst({
+          where: ilike(testCatalog.testName, `%${cleanedName}%`),
         });
       }
 
@@ -105,7 +132,7 @@ webhook.post("/metform", async (c) => {
           price: catalogTest.price,
         });
       } else {
-        console.warn(`⚠️  Test not found in catalog: "${testName}"`);
+        console.warn(`⚠️  Test not found in catalog: "${rawTestName}" (parsed: ${namePart})`);
       }
     }
 
@@ -121,12 +148,14 @@ webhook.post("/metform", async (c) => {
         wpEntryId: entryId,
         orderNumber,
         patientName: patient.patientName || "Unknown Patient",
-        patientDob: patient.patientDob || "1900-01-01",
-        patientPhone: patient.patientPhone || "N/A",
+        patientDob: patient.patientDob || null,
+        patientPhone: patient.patientPhone || null,
         patientSecondaryPhone: patient.patientSecondaryPhone,
-        patientAddress: patient.patientAddress || "N/A",
-        scheduleDate: patient.scheduleDate || new Date().toISOString().slice(0, 10),
-        scheduleTime: patient.scheduleTime || "09:00",
+        patientAddress: patient.patientAddress || null,
+        physicianName: patient.physicianName || null,
+        clinicAddress: patient.clinicAddress || null,
+        scheduleDate: patient.scheduleDate || null,
+        scheduleTime: patient.scheduleTime || null,
         dateOfOrder: patient.dateOfOrder || new Date().toISOString().slice(0, 10),
         formSlug,
         formName: form_name ? String(form_name) : null,
@@ -138,7 +167,9 @@ webhook.post("/metform", async (c) => {
         target: orders.wpEntryId,
         set: {
           patientName: patient.patientName || "Unknown Patient",
-          patientPhone: patient.patientPhone || "N/A",
+          patientPhone: patient.patientPhone || null,
+          physicianName: patient.physicianName || null,
+          clinicAddress: patient.clinicAddress || null,
           rawFormData: rawPayload,
           updatedAt: new Date(),
         },

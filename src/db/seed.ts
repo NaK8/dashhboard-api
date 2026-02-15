@@ -13,14 +13,14 @@ async function seed() {
     .insert(staff)
     .values({
       name: "Admin",
-      email: "admin@yourdomain.com",
+      email: "admin@wellhealthlabs.com",
       passwordHash: hashedPassword,
       role: "admin",
     })
     .onConflictDoNothing({ target: staff.email });
 
   console.log("✅ Admin user created");
-  console.log("   📧 Email:    admin@yourdomain.com");
+  console.log("   📧 Email:    admin@wellhealthlabs.com");
   console.log("   🔑 Password: admin123456");
   console.log("   ⚠️  CHANGE THIS IN PRODUCTION!\n");
 

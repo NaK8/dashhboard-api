@@ -49,18 +49,18 @@ export function extractPatientFields(formData: Record<string, unknown>) {
   // Add whatever your actual Metform field names are.
 
   const patientName = find([
-    "patient_name", "patient-name", "mf-patient-name",
+    "mf-patient-name", "patient_name", "patient-name",
     "full_name", "name", "mf-name",
   ]);
 
   const patientDob = find([
-    "patient_dob", "patient-dob", "date_of_birth",
-    "dob", "mf-dob", "patient_date_of_birth",
+    "mf-patient-dob", "patient_dob", "patient-dob",
+    "date_of_birth", "dob", "mf-dob", "patient_date_of_birth",
   ]);
 
   const patientPhone = find([
-    "patient_phone", "patient-phone", "contact_number",
-    "phone", "mf-phone", "patient_contact_number",
+    "mf-patient-phone", "patient_phone", "patient-phone",
+    "contact_number", "phone", "mf-phone", "patient_contact_number",
   ]);
 
   const patientSecondaryPhone = find([
@@ -73,23 +73,34 @@ export function extractPatientFields(formData: Record<string, unknown>) {
     "mf-address", "full_address",
   ]);
 
+  const physicianName = find([
+    "mf-physician-name", "physician_name", "physician-name",
+    "doctor_name", "doctor", "mf-doctor-name",
+  ]);
+
+  const clinicAddress = find([
+    "mf-clinic-address", "clinic_address", "clinic-address",
+    "clinic", "mf-clinic",
+  ]);
+
   const scheduleDate = find([
-    "schedule_date", "schedule-date", "appointment_date",
-    "mf-schedule-date", "date",
+    "mf-select-date", "schedule_date", "schedule-date",
+    "appointment_date", "mf-schedule-date", "date",
   ]);
 
   const scheduleTime = find([
-    "schedule_time", "schedule-time", "appointment_time",
-    "mf-schedule-time", "time", "time_slot",
+    "mf-available-slots", "schedule_time", "schedule-time",
+    "appointment_time", "mf-schedule-time", "time", "time_slot",
   ]);
 
   const dateOfOrder = find([
-    "date_of_order", "date-of-order", "order_date",
-    "mf-date-of-order",
+    "mf-date-of-order", "date_of_order", "date-of-order",
+    "order_date",
   ]);
 
   // ── Tests can come as comma-separated string, JSON array, or repeated fields ──
-  const testsRaw = formData["tests"]
+  const testsRaw = formData["mf-tests-selection"]
+    || formData["tests"]
     || formData["selected_tests"]
     || formData["mf-tests"]
     || formData["test_names"]
@@ -102,16 +113,21 @@ export function extractPatientFields(formData: Record<string, unknown>) {
     testNames = testsRaw.map(String).filter(Boolean);
   }
 
+  const category = find(["mf-test-category-name", "category", "test_category"]);
+
   return {
     patientName,
     patientDob,
     patientPhone,
     patientSecondaryPhone,
     patientAddress,
+    physicianName,
+    clinicAddress,
     scheduleDate,
     scheduleTime,
     dateOfOrder,
     testNames,
+    category,
   };
 }
 

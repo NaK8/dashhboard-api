@@ -91,7 +91,7 @@ nano .env
 # DATABASE_URL=postgresql://dashboard_user:your_strong_password_here@localhost:5432/medical_dashboard
 # JWT_SECRET=<generate-a-64-char-random-string>
 # WEBHOOK_SECRET=<generate-another-secret>
-# DASHBOARD_URL=https://dashboard.yourdomain.com
+# DASHBOARD_URL=https://dashboard.wellhealthlabs.com
 ```
 
 ### 5. Run Migrations & Seed
@@ -108,8 +108,8 @@ bun run db:seed
 bun run dev
 
 # In another terminal:
-curl http://localhost:3000/
-curl http://localhost:3000/webhook/health
+curl http://localhost:3001/
+curl http://localhost:3001/webhook/health
 ```
 
 ### 7. Setup as systemd Service
@@ -153,16 +153,16 @@ journalctl -u medical-api -f
 
 ```bash
 sudo apt install nginx -y
-sudo nano /etc/nginx/sites-available/api.yourdomain.com
+sudo nano /etc/nginx/sites-available/api.wellhealthlabs.com
 ```
 
 ```nginx
 server {
     listen 80;
-    server_name api.yourdomain.com;
+    server_name api.wellhealthlabs.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -176,13 +176,13 @@ server {
 ```
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/api.yourdomain.com /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/api.wellhealthlabs.com /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
 
 # SSL with Certbot
 sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d api.yourdomain.com
+sudo certbot --nginx -d api.wellhealthlabs.com
 ```
 
 ## WordPress Metform Webhook Setup
@@ -190,7 +190,7 @@ sudo certbot --nginx -d api.yourdomain.com
 ### Option A: Using Metform Pro Webhook
 1. Go to **Metform → Forms → Edit your form**
 2. Look for **Integration → Webhook** in form settings
-3. Set webhook URL: `https://api.yourdomain.com/webhook/metform`
+3. Set webhook URL: `https://api.wellhealthlabs.com/webhook/metform`
 4. Set method: **POST**
 5. Add custom header: `x-webhook-secret: your-webhook-secret-key`
 
@@ -198,7 +198,7 @@ sudo certbot --nginx -d api.yourdomain.com
 1. Install **WP Webhooks** plugin
 2. Go to **Settings → WP Webhooks → Send Data**
 3. Add new webhook trigger on **Metform Submission**
-4. Webhook URL: `https://api.yourdomain.com/webhook/metform`
+4. Webhook URL: `https://api.wellhealthlabs.com/webhook/metform`
 5. Add header: `x-webhook-secret: your-webhook-secret-key`
 
 ### Option C: Custom Code Snippet (Code Snippets Plugin)
@@ -206,7 +206,7 @@ Add this PHP snippet:
 
 ```php
 add_action('metform_after_store_form_data', function($form_id, $form_data) {
-    $webhook_url = 'https://api.yourdomain.com/webhook/metform';
+    $webhook_url = 'https://api.wellhealthlabs.com/webhook/metform';
 
     $payload = array_merge($form_data, [
         'form_id'        => $form_id,
@@ -230,7 +230,7 @@ add_action('metform_after_store_form_data', function($form_id, $form_data) {
 
 ```bash
 # Simulate a Metform submission
-curl -X POST https://api.yourdomain.com/webhook/metform \
+curl -X POST https://api.wellhealthlabs.com/webhook/metform \
   -H "Content-Type: application/json" \
   -H "x-webhook-secret: your-webhook-secret-key" \
   -d '{
@@ -251,7 +251,7 @@ Example of how your dashboard fetches data:
 
 ```typescript
 // api.ts
-const API_BASE = "https://api.yourdomain.com";
+const API_BASE = "https://api.wellhealthlabs.com";
 
 export const api = {
   async fetch(path: string, options?: RequestInit) {
