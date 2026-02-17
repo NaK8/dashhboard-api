@@ -77,7 +77,7 @@ app.onError((err, c) => {
 
 // ─── Start Server ────────────────────────────────────────
 
-const port = parseInt(process.env.PORT || "3001");
+const port = parseInt(process.env.PORT || "4000");
 
 export default {
 	port,
