@@ -42,6 +42,7 @@ webhook.post("/metform", async (c) => {
     // ── Verify webhook secret ─────────────────────────────
     const secret =
       c.req.header("x-webhook-secret") ||
+      c.req.query("secret") ||
       (rawPayload["webhook_secret"] as string) ||
       "";
 

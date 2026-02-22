@@ -63,6 +63,21 @@ export const updateOrderSchema = z.object({
   comment: z.string().optional(),
 });
 
+export const createOrderSchema = z.object({
+  patientName: z.string().min(1),
+  patientDob: z.string().optional(),
+  patientPhone: z.string().optional(),
+  patientAddress: z.string().optional(),
+  scheduleDate: z.string().optional(),
+  scheduleTime: z.string().optional(),
+  dateOfOrder: z.string().optional(),
+  tests: z.array(z.object({
+    testName: z.string(),
+    category: z.string().optional(),
+    price: z.string().optional(),
+  })).min(1),
+});
+
 // ─── Order Filters (dashboard query params) ──────────────
 
 export const orderFilterSchema = z.object({

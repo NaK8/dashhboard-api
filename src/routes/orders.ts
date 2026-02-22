@@ -2,14 +2,15 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { eq, desc, asc, and, ilike, sql, gte, lte, count } from "drizzle-orm";
 import { db } from "../db";
-import { orders, orderItems, statusHistory } from "../db/schema";
+import { orders, orderItems, statusHistory, testCatalog } from "../db/schema";
 import {
   updateOrderSchema,
+  createOrderSchema,
   orderFilterSchema,
   scheduleQuerySchema,
   VALID_TIME_SLOTS,
 } from "../lib/types";
-import { success, error } from "../lib/utils";
+import { success, error, generateOrderNumber } from "../lib/utils";
 import { authMiddleware } from "../middleware/auth";
 
 const ordersRoute = new Hono();
@@ -301,6 +302,80 @@ ordersRoute.patch(
     }
 
     return c.json(success(updated));
+  }
+);
+
+// ─── POST /orders — manual creation from dashboard ──────
+
+ordersRoute.post(
+  "/",
+  zValidator("json", createOrderSchema),
+  async (c) => {
+    const data = c.req.valid("json");
+    const user = c.get("user");
+    const orderNumber = generateOrderNumber();
+
+    const resolvedTests: Array<{
+      testId: number;
+      testName: string;
+      category: string;
+      price: string;
+    }> = [];
+
+    let totalAmount = 0;
+
+    for (const testReq of data.tests) {
+      const catalogTest = await db.query.testCatalog.findFirst({
+        where: eq(testCatalog.testName, testReq.testName),
+      });
+
+      if (!catalogTest) {
+        return c.json(error(`Test not found in catalog: ${testReq.testName}`), 400);
+      }
+
+      resolvedTests.push({
+        testId: catalogTest.id,
+        testName: catalogTest.testName,
+        category: catalogTest.category,
+        price: catalogTest.price,
+      });
+
+      totalAmount += parseFloat(catalogTest.price);
+    }
+
+    const [order] = await db
+      .insert(orders)
+      .values({
+        orderNumber,
+        patientName: data.patientName,
+        patientDob: data.patientDob || null,
+        patientPhone: data.patientPhone || null,
+        patientAddress: data.patientAddress || null,
+        scheduleDate: data.scheduleDate || null,
+        scheduleTime: data.scheduleTime || null,
+        dateOfOrder: data.dateOfOrder || new Date().toISOString().slice(0, 10),
+        formSlug: "dashboard-manual",
+        formName: "Dashboard Manual Entry",
+        totalAmount: totalAmount.toFixed(2),
+        status: "pending",
+        assignedTo: user.id, // Auto-assign to staff creating it
+        rawFormData: data,
+      })
+      .returning();
+
+    if (resolvedTests.length > 0) {
+      await db.insert(orderItems).values(
+        resolvedTests.map((test) => ({
+          orderId: order.id,
+          testId: test.testId,
+          testName: test.testName,
+          category: test.category,
+          priceAtOrder: test.price,
+        }))
+      );
+    }
+
+    return c.json(success(order), 201);
   }
 );
 
