@@ -23,6 +23,8 @@ webhook.post("/metform", async (c) => {
 
   try {
     const contentType = c.req.header("content-type") || "";
+    console.log(`📨 Webhook received | Content-Type: ${contentType}`);
+
     if (contentType.includes("application/json")) {
       rawPayload = await c.req.json();
     } else {
@@ -33,7 +35,9 @@ webhook.post("/metform", async (c) => {
     // Hono's parseBody can return objects with a null prototype (Object.create(null)).
     // Drizzle ORM crashes when checking these objects. Normalizing to a standard object:
     rawPayload = rawPayload ? JSON.parse(JSON.stringify(rawPayload)) : {};
-  } catch {
+    console.log(`📦 Payload keys: ${Object.keys(rawPayload).join(", ")}`);
+  } catch (parseErr) {
+    console.error("❌ Webhook payload parsing failed:", parseErr);
     return c.json(error("Invalid payload"), 400);
   }
 
@@ -64,12 +68,15 @@ webhook.post("/metform", async (c) => {
     // ── Parse payload ─────────────────────────────────────
     const parsed = webhookPayloadSchema.safeParse(rawPayload);
     if (!parsed.success) {
+      console.error("❌ Zod validation failed:", parsed.error.message);
+      console.error("   Raw payload:", JSON.stringify(rawPayload).slice(0, 500));
       await db
         .update(webhookLogs)
         .set({ status: "failed", errorMessage: parsed.error.message })
         .where(eq(webhookLogs.id, logEntry.id));
       return c.json(error("Invalid form data"), 400);
     }
+    console.log(`✅ Zod validation passed | form_id: ${parsed.data.form_id} | entry_id: ${parsed.data.entry_id}`);
 
     const data = parsed.data;
     const { entries, form_id, form_name, entry_id, file_uploads, webhook_secret, ...extraFields } = data;
