@@ -1,6 +1,27 @@
 import type { ApiResponse } from "./types";
 
 /**
+ * Normalize a test name for safe matching.
+ * Strips brackets, parentheses, special chars → lowercase, spaces only.
+ *
+ * Examples:
+ *   "RA Factor (Rheumatoid)"           → "ra factor rheumatoid"
+ *   "ra-factor-rheumatoid-$39"         → "ra factor rheumatoid 39"
+ *   "Comp. Metabolic Panel"            → "comp metabolic panel"
+ *   "Vitamin B12 & Folate"             → "vitamin b12 folate"
+ *   "CBC w/Differential"               → "cbc w differential"
+ */
+export function normalizeTestName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[()[\]{}]/g, "")    // strip brackets/parens
+    .replace(/[&]/g, " ")         // & → space
+    .replace(/[^a-z0-9\s]/g, " ") // all other special chars → space
+    .replace(/\s+/g, " ")         // collapse whitespace
+    .trim();
+}
+
+/**
  * Consistent success response
  */
 export function success<T>(data: T, meta?: ApiResponse["meta"]): ApiResponse<T> {

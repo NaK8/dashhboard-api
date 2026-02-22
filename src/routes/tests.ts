@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { testCatalog } from "../db/schema";
 import { createTestSchema, updateTestSchema } from "../lib/types";
-import { success, error } from "../lib/utils";
+import { success, error, normalizeTestName } from "../lib/utils";
 import { authMiddleware, adminOnly } from "../middleware/auth";
 
 const testsRoute = new Hono();
@@ -71,7 +71,10 @@ testsRoute.post(
 
     const [newTest] = await db
       .insert(testCatalog)
-      .values(data)
+      .values({
+        ...data,
+        searchName: normalizeTestName(data.testName),
+      })
       .returning();
 
     return c.json(success(newTest), 201);
@@ -93,9 +96,19 @@ testsRoute.patch(
       return c.json(error("Invalid test ID"), 400);
     }
 
+    // If testName is being updated, regenerate searchName
+    const setFields: Record<string, unknown> = {
+      ...updates,
+      updatedAt: new Date(),
+    };
+
+    if (updates.testName) {
+      setFields.searchName = normalizeTestName(updates.testName);
+    }
+
     const [updated] = await db
       .update(testCatalog)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(setFields)
       .where(eq(testCatalog.id, id))
       .returning();
 

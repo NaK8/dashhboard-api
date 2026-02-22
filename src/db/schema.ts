@@ -25,15 +25,27 @@ export const orderStatusEnum = pgEnum("order_status", [
   "cancelled",     // patient or admin cancelled
 ]);
 
-export const testCategoryEnum = pgEnum("test_category", [
-  "medical_testing_and_panels",
-  "std_testing",
-  "drug_testing",
-  "respiratory_testing",
-  "uti_testing",
-  "wound_testing",
-  "gastrointestinal_testing",
-]);
+// ─── Test Categories (data-driven, no more pgEnum) ───────
+// Categories are now stored in the DB so adding a new one
+// is a simple INSERT — no code changes or migrations needed.
+
+export const testCategories = pgTable(
+  "test_categories",
+  {
+    id: serial("id").primaryKey(),
+    key: varchar("key", { length: 100 }).notNull().unique(),
+    displayName: varchar("display_name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull().unique(),
+    iconName: varchar("icon_name", { length: 50 }).notNull().default("TestTube"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_categories_active").on(table.isActive),
+    index("idx_categories_sort").on(table.sortOrder),
+  ]
+);
 
 // ─── Staff Table ─────────────────────────────────────────
 
@@ -58,7 +70,8 @@ export const testCatalog = pgTable(
   {
     id: serial("id").primaryKey(),
     testName: varchar("test_name", { length: 255 }).notNull(),
-    category: testCategoryEnum("category").notNull(),
+    searchName: varchar("search_name", { length: 255 }).notNull(),
+    category: varchar("category", { length: 100 }).notNull(),
     price: numeric("price", { precision: 10, scale: 2 }).notNull(),
     description: text("description"),
     isActive: boolean("is_active").notNull().default(true),
@@ -69,6 +82,7 @@ export const testCatalog = pgTable(
     index("idx_catalog_category").on(table.category),
     index("idx_catalog_active").on(table.isActive),
     index("idx_catalog_name").on(table.testName),
+    index("idx_catalog_search_name").on(table.searchName),
   ]
 );
 
@@ -196,12 +210,20 @@ export const webhookLogs = pgTable("webhook_logs", {
 
 // ─── Relations ───────────────────────────────────────────
 
+export const testCategoriesRelations = relations(testCategories, ({ many }) => ({
+  tests: many(testCatalog),
+}));
+
 export const staffRelations = relations(staff, ({ many }) => ({
   assignedOrders: many(orders),
   statusChanges: many(statusHistory),
 }));
 
-export const testCatalogRelations = relations(testCatalog, ({ many }) => ({
+export const testCatalogRelations = relations(testCatalog, ({ one, many }) => ({
+  categoryRef: one(testCategories, {
+    fields: [testCatalog.category],
+    references: [testCategories.key],
+  }),
   orderItems: many(orderItems),
 }));
 

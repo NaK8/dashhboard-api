@@ -44,16 +44,6 @@ export const ORDER_STATUSES = [
   "cancelled",
 ] as const;
 
-export const TEST_CATEGORIES = [
-  "medical_testing_and_panels",
-  "std_testing",
-  "drug_testing",
-  "respiratory_testing",
-  "uti_testing",
-  "wound_testing",
-  "gastrointestinal_testing",
-] as const;
-
 // ─── Order Updates ───────────────────────────────────────
 
 export const updateOrderSchema = z.object({
@@ -83,7 +73,7 @@ export const createOrderSchema = z.object({
 export const orderFilterSchema = z.object({
   status: z.enum(ORDER_STATUSES).optional(),
   formSlug: z.string().optional(),
-  category: z.enum(TEST_CATEGORIES).optional(),
+  category: z.string().optional(),
   assignedTo: z.coerce.number().optional(),
   search: z.string().optional(),
   dateFrom: z.string().optional(),
@@ -112,7 +102,7 @@ export const webhookPayloadSchema = z.object({
 
 export const updateTestSchema = z.object({
   testName: z.string().min(2).max(255).optional(),
-  category: z.enum(TEST_CATEGORIES).optional(),
+  category: z.string().optional(),
   price: z.string().optional(),
   description: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
@@ -120,9 +110,27 @@ export const updateTestSchema = z.object({
 
 export const createTestSchema = z.object({
   testName: z.string().min(2).max(255),
-  category: z.enum(TEST_CATEGORIES),
+  category: z.string(),
   price: z.string(),
   description: z.string().nullable().optional(),
+});
+
+// ─── Test Categories ─────────────────────────────────────
+
+export const createCategorySchema = z.object({
+  key: z.string().min(2).max(100).regex(/^[a-z][a-z0-9_]*$/, "Key must be snake_case (lowercase letters, numbers, underscores)"),
+  displayName: z.string().min(2).max(255),
+  slug: z.string().min(2).max(100).regex(/^[a-z][a-z0-9-]*$/, "Slug must be kebab-case (lowercase letters, numbers, hyphens)"),
+  iconName: z.string().min(1).max(50).default("TestTube"),
+  sortOrder: z.number().int().min(0).default(0),
+});
+
+export const updateCategorySchema = z.object({
+  displayName: z.string().min(2).max(255).optional(),
+  slug: z.string().min(2).max(100).regex(/^[a-z][a-z0-9-]*$/, "Slug must be kebab-case").optional(),
+  iconName: z.string().min(1).max(50).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+  isActive: z.boolean().optional(),
 });
 
 // ─── Schedule Availability Query ─────────────────────────

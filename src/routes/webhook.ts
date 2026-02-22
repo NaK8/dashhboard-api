@@ -1,11 +1,12 @@
 import { Hono } from "hono";
-import { eq, ilike, and, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db";
 import { orders, orderItems, testCatalog, webhookLogs } from "../db/schema";
 import { webhookPayloadSchema } from "../lib/types";
 import {
   extractPatientFields,
   normalizeFormSlug,
+  normalizeTestName,
   generateOrderNumber,
   success,
   error,
@@ -28,6 +29,10 @@ webhook.post("/metform", async (c) => {
       const formData = await c.req.parseBody();
       rawPayload = formData as Record<string, unknown>;
     }
+
+    // Hono's parseBody can return objects with a null prototype (Object.create(null)).
+    // Drizzle ORM crashes when checking these objects. Normalizing to a standard object:
+    rawPayload = rawPayload ? JSON.parse(JSON.stringify(rawPayload)) : {};
   } catch {
     return c.json(error("Invalid payload"), 400);
   }
@@ -82,8 +87,7 @@ webhook.post("/metform", async (c) => {
     const orderNumber = generateOrderNumber();
 
     // ── Resolve tests from catalog ────────────────────────
-    // Match test names from the form to our catalog.
-    // This handles slight name variations with ILIKE.
+    // Match test names using normalized searchName for bracket/dash safety.
     const resolvedTests: Array<{
       testId: number;
       testName: string;
@@ -97,31 +101,30 @@ webhook.post("/metform", async (c) => {
       const namePart = priceMatch ? priceMatch[1].replace(/-/g, " ") : rawTestName;
       const pricePart = priceMatch ? priceMatch[2] : null;
 
-      // 2. Try Exact Match (on namePart)
+      // 2. Normalize the name for matching
+      const normalizedName = normalizeTestName(namePart);
+
+      // 3. Try exact match on searchName (most reliable)
       let catalogTest = await db.query.testCatalog.findFirst({
-        where: eq(testCatalog.testName, namePart),
+        where: eq(testCatalog.searchName, normalizedName),
       });
 
-      // 3. Try Category + Price Match (if we have both)
+      // 4. Try Category + Price match (if we have both)
       if (!catalogTest && pricePart && patient.category) {
-        // Normalize category: "drug-testing" -> "drug_testing" to match Enum
         const normalizedCategory = patient.category.replace(/-/g, "_");
 
         catalogTest = await db.query.testCatalog.findFirst({
           where: and(
-            eq(testCatalog.category, normalizedCategory as any),
-            // Compare price (cast DB numeric to simple string comparison handling .00)
-             sql`${testCatalog.price}::numeric = ${pricePart}::numeric`
+            eq(testCatalog.category, normalizedCategory),
+            sql`${testCatalog.price}::numeric = ${pricePart}::numeric`
           ),
         });
       }
 
-      // 4. Try Fuzzy Match (fallback)
+      // 5. Try fuzzy searchName match (fallback)
       if (!catalogTest) {
-        // Clean up formatting: "drug-screening-and-confirmation" -> "drug screening and confirmation"
-        const cleanedName = namePart.replace(/-/g, " ");
         catalogTest = await db.query.testCatalog.findFirst({
-          where: ilike(testCatalog.testName, `%${cleanedName}%`),
+          where: sql`${testCatalog.searchName} LIKE ${"%" + normalizedName + "%"}`,
         });
       }
 
@@ -133,7 +136,7 @@ webhook.post("/metform", async (c) => {
           price: catalogTest.price,
         });
       } else {
-        console.warn(`⚠️  Test not found in catalog: "${rawTestName}" (parsed: ${namePart})`);
+        console.warn(`⚠️  Test not found in catalog: "${rawTestName}" (normalized: "${normalizedName}")`);
       }
     }
 
@@ -142,53 +145,57 @@ webhook.post("/metform", async (c) => {
       .reduce((sum, t) => sum + parseFloat(t.price), 0)
       .toFixed(2);
 
-    // ── Insert order ──────────────────────────────────────
-    const [order] = await db
-      .insert(orders)
-      .values({
-        wpEntryId: entryId,
-        orderNumber,
-        patientName: patient.patientName || "Unknown Patient",
-        patientDob: patient.patientDob || null,
-        patientPhone: patient.patientPhone || null,
-        patientSecondaryPhone: patient.patientSecondaryPhone,
-        patientAddress: patient.patientAddress || null,
-        physicianName: patient.physicianName || null,
-        clinicAddress: patient.clinicAddress || null,
-        scheduleDate: patient.scheduleDate || null,
-        scheduleTime: patient.scheduleTime || null,
-        dateOfOrder: patient.dateOfOrder || new Date().toISOString().slice(0, 10),
-        formSlug,
-        formName: form_name ? String(form_name) : null,
-        totalAmount,
-        status: "pending",
-        rawFormData: rawPayload,
-      })
-      .onConflictDoUpdate({
-        target: orders.wpEntryId,
-        set: {
+    // ── Insert order + items in a single transaction ──────
+    // Guarantees atomicity: either both succeed or both rollback.
+    const order = await db.transaction(async (tx) => {
+      const [newOrder] = await tx
+        .insert(orders)
+        .values({
+          wpEntryId: entryId,
+          orderNumber,
           patientName: patient.patientName || "Unknown Patient",
+          patientDob: patient.patientDob || null,
           patientPhone: patient.patientPhone || null,
+          patientSecondaryPhone: patient.patientSecondaryPhone,
+          patientAddress: patient.patientAddress || null,
           physicianName: patient.physicianName || null,
           clinicAddress: patient.clinicAddress || null,
+          scheduleDate: patient.scheduleDate || null,
+          scheduleTime: patient.scheduleTime || null,
+          dateOfOrder: patient.dateOfOrder || new Date().toISOString().slice(0, 10),
+          formSlug,
+          formName: form_name ? String(form_name) : null,
+          totalAmount,
+          status: "pending",
           rawFormData: rawPayload,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
+        })
+        .onConflictDoUpdate({
+          target: orders.wpEntryId,
+          set: {
+            patientName: patient.patientName || "Unknown Patient",
+            patientPhone: patient.patientPhone || null,
+            physicianName: patient.physicianName || null,
+            clinicAddress: patient.clinicAddress || null,
+            rawFormData: rawPayload,
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
 
-    // ── Insert order items ────────────────────────────────
-    if (resolvedTests.length > 0) {
-      await db.insert(orderItems).values(
-        resolvedTests.map((test) => ({
-          orderId: order.id,
-          testId: test.testId,
-          testName: test.testName,
-          category: test.category,
-          priceAtOrder: test.price,
-        }))
-      );
-    }
+      if (resolvedTests.length > 0) {
+        await tx.insert(orderItems).values(
+          resolvedTests.map((test) => ({
+            orderId: newOrder.id,
+            testId: test.testId,
+            testName: test.testName,
+            category: test.category,
+            priceAtOrder: test.price,
+          }))
+        );
+      }
+
+      return newOrder;
+    });
 
     // ── Mark webhook as processed ─────────────────────────
     await db
