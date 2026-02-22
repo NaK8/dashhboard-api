@@ -35,6 +35,17 @@ webhook.post("/metform", async (c) => {
     // Hono's parseBody can return objects with a null prototype (Object.create(null)).
     // Drizzle ORM crashes when checking these objects. Normalizing to a standard object:
     rawPayload = rawPayload ? JSON.parse(JSON.stringify(rawPayload)) : {};
+
+    // WordPress Metform sends `entries` as a JSON string when using
+    // application/x-www-form-urlencoded. Parse it back into an object.
+    if (typeof rawPayload.entries === "string") {
+      try {
+        rawPayload.entries = JSON.parse(rawPayload.entries);
+      } catch {
+        console.warn("⚠️  Could not parse entries string, using as-is");
+      }
+    }
+
     console.log(`📦 Payload keys: ${Object.keys(rawPayload).join(", ")}`);
   } catch (parseErr) {
     console.error("❌ Webhook payload parsing failed:", parseErr);
