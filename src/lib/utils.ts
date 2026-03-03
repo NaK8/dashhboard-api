@@ -136,6 +136,21 @@ export function extractPatientFields(formData: Record<string, unknown>) {
 
   const category = find(["mf-test-category-name", "category", "test_category"]);
 
+  // ── Order type & payment ─────────────────────────────────
+  const orderType = find([
+    "mf-order-type", "order_type", "order-type", "orderType",
+  ]);
+
+  const paymentMethod = find([
+    "mf-payment-method", "payment_method", "payment-method", "paymentMethod",
+  ]);
+
+  const travelFeeRaw = find([
+    "mf-travel-fee", "travel_fee", "travel-fee", "travelFee",
+    "surcharge", "mf-surcharge",
+  ]);
+  const travelFee = travelFeeRaw ? parseFloat(travelFeeRaw) : 0;
+
   return {
     patientName,
     patientDob,
@@ -149,6 +164,9 @@ export function extractPatientFields(formData: Record<string, unknown>) {
     dateOfOrder,
     testNames,
     category,
+    orderType,
+    paymentMethod,
+    travelFee,
   };
 }
 

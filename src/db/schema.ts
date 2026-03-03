@@ -25,6 +25,10 @@ export const orderStatusEnum = pgEnum("order_status", [
   "cancelled",     // patient or admin cancelled
 ]);
 
+export const orderTypeEnum = pgEnum("order_type", ["walk_in", "home_collection"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["online", "at_counter"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "failed"]);
+
 // ─── Test Categories (data-driven, no more pgEnum) ───────
 // Categories are now stored in the DB so adding a new one
 // is a simple INSERT — no code changes or migrations needed.
@@ -118,7 +122,14 @@ export const orders = pgTable(
     formSlug: varchar("form_slug", { length: 150 }).notNull(),
     formName: varchar("form_name", { length: 255 }),
 
+    // ── Order Type & Payment ────────────────────────────
+    orderType: orderTypeEnum("order_type").notNull().default("walk_in"),
+    paymentMethod: paymentMethodEnum("payment_method"),
+    paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
+
     // ── Pricing ─────────────────────────────────────────
+    sampleCollectionFee: numeric("sample_collection_fee", { precision: 10, scale: 2 }).notNull().default("15.00"),
+    travelFee: numeric("travel_fee", { precision: 10, scale: 2 }).notNull().default("0.00"),
     totalAmount: numeric("total_amount", { precision: 10, scale: 2 }).notNull().default("0"),
 
     // ── Workflow ─────────────────────────────────────────
@@ -144,6 +155,7 @@ export const orders = pgTable(
     index("idx_orders_assigned").on(table.assignedTo),
     index("idx_orders_patient_name").on(table.patientName),
     index("idx_orders_patient_phone").on(table.patientPhone),
+    index("idx_orders_order_type").on(table.orderType),
     uniqueIndex("idx_orders_number").on(table.orderNumber),
     uniqueIndex("idx_orders_wp_entry").on(table.wpEntryId),
   ]

@@ -3,6 +3,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db";
 import { orders, orderItems, testCatalog, webhookLogs } from "../db/schema";
 import { webhookPayloadSchema } from "../lib/types";
+import { VALID_TRAVEL_FEES } from "../lib/types";
 import {
   extractPatientFields,
   normalizeFormSlug,
@@ -158,10 +159,39 @@ webhook.post("/metform", async (c) => {
       }
     }
 
-    // ── Calculate total ───────────────────────────────────
-    const totalAmount = resolvedTests
-      .reduce((sum, t) => sum + parseFloat(t.price), 0)
-      .toFixed(2);
+    // ── Calculate total with fees ─────────────────────────
+    const testTotal = resolvedTests
+      .reduce((sum, t) => sum + parseFloat(t.price), 0);
+
+    const SAMPLE_COLLECTION_FEE = 15;
+
+    // Determine order type and validate
+    const orderType = (patient.orderType === "home_collection" ? "home_collection" : "walk_in") as "walk_in" | "home_collection";
+    const paymentMethod = (patient.paymentMethod === "at_counter" ? "at_counter" : patient.paymentMethod === "online" ? "online" : null) as "online" | "at_counter" | null;
+
+    // Validate: home collection requires patient address
+    if (orderType === "home_collection" && !patient.patientAddress) {
+      await db
+        .update(webhookLogs)
+        .set({ status: "failed", errorMessage: "Home collection orders require a patient address" })
+        .where(eq(webhookLogs.id, logEntry.id));
+      return c.json(error("Home collection orders require a patient address"), 400);
+    }
+
+    // Validate travel fee (only for home collection, must be $25–$50)
+    let travelFee = 0;
+    if (orderType === "home_collection") {
+      travelFee = patient.travelFee || 0;
+      if (travelFee > 0 && !(VALID_TRAVEL_FEES as readonly number[]).includes(travelFee)) {
+        await db
+          .update(webhookLogs)
+          .set({ status: "failed", errorMessage: `Invalid travel fee: $${travelFee}. Must be $25–$50 in $5 increments.` })
+          .where(eq(webhookLogs.id, logEntry.id));
+        return c.json(error(`Invalid travel fee: $${travelFee}`), 400);
+      }
+    }
+
+    const totalAmount = (testTotal + SAMPLE_COLLECTION_FEE + travelFee).toFixed(2);
 
     // ── Insert order + items in a single transaction ──────
     // Guarantees atomicity: either both succeed or both rollback.
@@ -183,6 +213,11 @@ webhook.post("/metform", async (c) => {
           dateOfOrder: patient.dateOfOrder || new Date().toISOString().slice(0, 10),
           formSlug,
           formName: form_name ? String(form_name) : null,
+          orderType,
+          paymentMethod,
+          paymentStatus: "pending",
+          sampleCollectionFee: SAMPLE_COLLECTION_FEE.toFixed(2),
+          travelFee: travelFee.toFixed(2),
           totalAmount,
           status: "pending",
           rawFormData: rawPayload,

@@ -44,6 +44,13 @@ export const ORDER_STATUSES = [
   "cancelled",
 ] as const;
 
+export const ORDER_TYPES = ["walk_in", "home_collection"] as const;
+export const PAYMENT_METHODS = ["online", "at_counter"] as const;
+export const PAYMENT_STATUSES = ["pending", "paid", "failed"] as const;
+
+// Valid travel fee amounts for home collection ($25–$50 in $5 increments)
+export const VALID_TRAVEL_FEES = [25, 30, 35, 40, 45, 50] as const;
+
 // ─── Order Updates ───────────────────────────────────────
 
 export const updateOrderSchema = z.object({
@@ -61,6 +68,9 @@ export const createOrderSchema = z.object({
   scheduleDate: z.string().optional(),
   scheduleTime: z.string().optional(),
   dateOfOrder: z.string().optional(),
+  orderType: z.enum(ORDER_TYPES).default("walk_in"),
+  paymentMethod: z.enum(PAYMENT_METHODS).optional(),
+  travelFee: z.number().min(0).max(50).default(0),
   tests: z.array(z.object({
     testName: z.string(),
     category: z.string().optional(),
@@ -74,6 +84,7 @@ export const orderFilterSchema = z.object({
   status: z.enum(ORDER_STATUSES).optional(),
   formSlug: z.string().optional(),
   category: z.string().optional(),
+  orderType: z.enum(ORDER_TYPES).optional(),
   assignedTo: z.coerce.number().optional(),
   search: z.string().optional(),
   dateFrom: z.string().optional(),

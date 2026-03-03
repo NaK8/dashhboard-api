@@ -9,6 +9,7 @@ import {
   orderFilterSchema,
   scheduleQuerySchema,
   VALID_TIME_SLOTS,
+  VALID_TRAVEL_FEES,
 } from "../lib/types";
 import { success, error, generateOrderNumber } from "../lib/utils";
 import { authMiddleware } from "../middleware/auth";
@@ -35,6 +36,10 @@ ordersRoute.get("/", zValidator("query", orderFilterSchema), async (c) => {
 
   if (filters.assignedTo) {
     conditions.push(eq(orders.assignedTo, filters.assignedTo));
+  }
+
+  if (filters.orderType) {
+    conditions.push(eq(orders.orderType, filters.orderType));
   }
 
   if (filters.scheduleDate) {
@@ -155,10 +160,20 @@ ordersRoute.get("/stats", async (c) => {
     })
     .from(orders);
 
+  // Order type breakdown
+  const orderTypeStats = await db
+    .select({ orderType: orders.orderType, count: count() })
+    .from(orders)
+    .groupBy(orders.orderType);
+
   return c.json(
     success({
       byStatus: statusStats.reduce(
         (acc, row) => ({ ...acc, [row.status]: row.count }),
+        {} as Record<string, number>
+      ),
+      byOrderType: orderTypeStats.reduce(
+        (acc, row) => ({ ...acc, [row.orderType]: row.count }),
         {} as Record<string, number>
       ),
       todaySubmissions: todayCount.count,
@@ -322,7 +337,7 @@ ordersRoute.post(
       price: string;
     }> = [];
 
-    let totalAmount = 0;
+    let testTotal = 0;
 
     for (const testReq of data.tests) {
       const catalogTest = await db.query.testCatalog.findFirst({
@@ -340,8 +355,25 @@ ordersRoute.post(
         price: catalogTest.price,
       });
 
-      totalAmount += parseFloat(catalogTest.price);
+      testTotal += parseFloat(catalogTest.price);
     }
+
+    // Fee calculation
+    const SAMPLE_COLLECTION_FEE = 15;
+    const orderType = data.orderType || "walk_in";
+    let travelFee = 0;
+
+    if (orderType === "home_collection") {
+      travelFee = data.travelFee || 0;
+      if (travelFee > 0 && !(VALID_TRAVEL_FEES as readonly number[]).includes(travelFee)) {
+        return c.json(error(`Invalid travel fee: $${travelFee}. Must be $25–$50 in $5 increments.`), 400);
+      }
+      if (!data.patientAddress) {
+        return c.json(error("Home collection orders require a patient address"), 400);
+      }
+    }
+
+    const totalAmount = (testTotal + SAMPLE_COLLECTION_FEE + travelFee).toFixed(2);
 
     const [order] = await db
       .insert(orders)
@@ -356,9 +388,14 @@ ordersRoute.post(
         dateOfOrder: data.dateOfOrder || new Date().toISOString().slice(0, 10),
         formSlug: "dashboard-manual",
         formName: "Dashboard Manual Entry",
-        totalAmount: totalAmount.toFixed(2),
+        orderType,
+        paymentMethod: data.paymentMethod || null,
+        paymentStatus: "pending",
+        sampleCollectionFee: SAMPLE_COLLECTION_FEE.toFixed(2),
+        travelFee: travelFee.toFixed(2),
+        totalAmount,
         status: "pending",
-        assignedTo: user.id, // Auto-assign to staff creating it
+        assignedTo: user.id,
         rawFormData: data,
       })
       .returning();
