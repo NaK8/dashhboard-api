@@ -113,14 +113,18 @@ export const orders = pgTable(
     clinicAddress: text("clinic_address"),
 
     // ── Scheduling ──────────────────────────────────────
-    // 20-min slots: "09:00", "09:20", "09:40" ... "16:40"
+    // Walk-in: 20-min slot "10:00 AM" | In-house: 2-hr range "11:00 AM to 01:00 PM"
     scheduleDate: date("schedule_date"),
-    scheduleTime: varchar("schedule_time", { length: 10 }),
+    scheduleTime: varchar("schedule_time", { length: 30 }),
 
     // ── Order Metadata ──────────────────────────────────
     dateOfOrder: date("date_of_order").notNull(),
     formSlug: varchar("form_slug", { length: 150 }).notNull(),
     formName: varchar("form_name", { length: 255 }),
+
+    // ── Location ────────────────────────────────────────
+    // Which facility the order came from: 'dallas' | 'houston'
+    location: varchar("location", { length: 20 }),
 
     // ── Order Type & Payment ────────────────────────────
     orderType: orderTypeEnum("order_type").notNull().default("walk_in"),
@@ -139,6 +143,22 @@ export const orders = pgTable(
     }),
     notes: text("notes"),
 
+    // ── Extended Patient Fields ──────────────────────────
+    patientEmail: varchar("patient_email", { length: 255 }),
+    patientCity: varchar("patient_city", { length: 100 }),
+    patientState: varchar("patient_state", { length: 100 }),
+    patientZipCode: varchar("patient_zip_code", { length: 20 }),
+    referralSource: varchar("referral_source", { length: 255 }),
+    allergyInfo: text("allergy_info"),
+    // JSON: { agreed: boolean[], initials: string[] } — 5 consent checkboxes
+    consentData: jsonb("consent_data"),
+
+    // ── Signature & ID ──────────────────────────────────
+    // Base64 PNG of patient signature (present on all 4 form types)
+    signatureBase64: text("signature_base64"),
+    // WordPress URL of uploaded driving license image (in-house forms only)
+    drivingLicenseUrl: text("driving_license_url"),
+
     // ── Safety net: keep the raw webhook payload ────────
     rawFormData: jsonb("raw_form_data"),
 
@@ -156,6 +176,7 @@ export const orders = pgTable(
     index("idx_orders_patient_name").on(table.patientName),
     index("idx_orders_patient_phone").on(table.patientPhone),
     index("idx_orders_order_type").on(table.orderType),
+    index("idx_orders_location").on(table.location),
     uniqueIndex("idx_orders_number").on(table.orderNumber),
     uniqueIndex("idx_orders_wp_entry").on(table.wpEntryId),
   ]

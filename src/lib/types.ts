@@ -85,6 +85,7 @@ export const orderFilterSchema = z.object({
   formSlug: z.string().optional(),
   category: z.string().optional(),
   orderType: z.enum(ORDER_TYPES).optional(),
+  location: z.enum(["dallas", "houston"]).optional(),
   assignedTo: z.coerce.number().optional(),
   search: z.string().optional(),
   dateFrom: z.string().optional(),

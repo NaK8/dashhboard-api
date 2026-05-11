@@ -42,6 +42,10 @@ ordersRoute.get("/", zValidator("query", orderFilterSchema), async (c) => {
     conditions.push(eq(orders.orderType, filters.orderType));
   }
 
+  if (filters.location) {
+    conditions.push(eq(orders.location, filters.location));
+  }
+
   if (filters.scheduleDate) {
     conditions.push(eq(orders.scheduleDate, filters.scheduleDate));
   }
@@ -166,6 +170,12 @@ ordersRoute.get("/stats", async (c) => {
     .from(orders)
     .groupBy(orders.orderType);
 
+  // Location breakdown
+  const locationStats = await db
+    .select({ location: orders.location, count: count() })
+    .from(orders)
+    .groupBy(orders.location);
+
   return c.json(
     success({
       byStatus: statusStats.reduce(
@@ -174,6 +184,10 @@ ordersRoute.get("/stats", async (c) => {
       ),
       byOrderType: orderTypeStats.reduce(
         (acc, row) => ({ ...acc, [row.orderType]: row.count }),
+        {} as Record<string, number>
+      ),
+      byLocation: locationStats.reduce(
+        (acc, row) => ({ ...acc, [row.location ?? "unknown"]: row.count }),
         {} as Record<string, number>
       ),
       todaySubmissions: todayCount.count,

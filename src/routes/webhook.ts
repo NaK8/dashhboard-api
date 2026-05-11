@@ -3,7 +3,6 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db";
 import { orders, orderItems, testCatalog, webhookLogs } from "../db/schema";
 import { webhookPayloadSchema } from "../lib/types";
-import { VALID_TRAVEL_FEES } from "../lib/types";
 import {
   extractPatientFields,
   normalizeFormSlug,
@@ -99,14 +98,15 @@ webhook.post("/metform", async (c) => {
       : { ...extraFields };
 
     // ── Extract structured fields ─────────────────────────
-    const patient = extractPatientFields(formFields);
+    const patient = extractPatientFields(formFields, file_uploads);
 
     const entryId = entry_id ? String(entry_id) : `wp-${Date.now()}`;
     const formSlug = normalizeFormSlug(form_id || form_name);
     const orderNumber = generateOrderNumber();
 
     // ── Resolve tests from catalog ────────────────────────
-    // Match test names using normalized searchName for bracket/dash safety.
+    // Each test carries a categoryHint from its form field, which lets us
+    // search within the right category before falling back to global matching.
     const resolvedTests: Array<{
       testId: number;
       testName: string;
@@ -114,33 +114,51 @@ webhook.post("/metform", async (c) => {
       price: string;
     }> = [];
 
-    for (const rawTestName of patient.testNames) {
-      // 1. Parse "Name-$Price" format (e.g., "drug-screening-and-confirmation-$140")
+    for (const { name: rawTestName, categoryHint } of patient.tests) {
+      // 1. Parse "Name-$Price" format (e.g., "UTI-Urinary-Tract-Infection-$140")
       const priceMatch = rawTestName.match(/^(.*)-\$(\d+)$/);
-      const namePart = priceMatch ? priceMatch[1].replace(/-/g, " ") : rawTestName;
+      const namePart = priceMatch ? priceMatch[1].replace(/-/g, " ") : rawTestName.replace(/-/g, " ");
       const pricePart = priceMatch ? priceMatch[2] : null;
 
-      // 2. Normalize the name for matching
+      // 2. Normalize for matching
       const normalizedName = normalizeTestName(namePart);
 
-      // 3. Try exact match on searchName (most reliable)
+      // 3. Exact searchName within known category (most reliable)
       let catalogTest = await db.query.testCatalog.findFirst({
-        where: eq(testCatalog.searchName, normalizedName),
+        where: and(
+          eq(testCatalog.searchName, normalizedName),
+          eq(testCatalog.category, categoryHint),
+        ),
       });
 
-      // 4. Try Category + Price match (if we have both)
-      if (!catalogTest && pricePart && patient.category) {
-        const normalizedCategory = patient.category.replace(/-/g, "_");
+      // 4. Exact searchName globally (category may differ from hint)
+      if (!catalogTest) {
+        catalogTest = await db.query.testCatalog.findFirst({
+          where: eq(testCatalog.searchName, normalizedName),
+        });
+      }
 
+      // 5. Category + Price combo (catches ambiguous names with same price)
+      if (!catalogTest && pricePart) {
         catalogTest = await db.query.testCatalog.findFirst({
           where: and(
-            eq(testCatalog.category, normalizedCategory),
+            eq(testCatalog.category, categoryHint),
             sql`${testCatalog.price}::numeric = ${pricePart}::numeric`
           ),
         });
       }
 
-      // 5. Try fuzzy searchName match (fallback)
+      // 6. Fuzzy searchName within category
+      if (!catalogTest) {
+        catalogTest = await db.query.testCatalog.findFirst({
+          where: and(
+            eq(testCatalog.category, categoryHint),
+            sql`${testCatalog.searchName} LIKE ${"%" + normalizedName + "%"}`,
+          ),
+        });
+      }
+
+      // 7. Global fuzzy fallback
       if (!catalogTest) {
         catalogTest = await db.query.testCatalog.findFirst({
           where: sql`${testCatalog.searchName} LIKE ${"%" + normalizedName + "%"}`,
@@ -155,46 +173,21 @@ webhook.post("/metform", async (c) => {
           price: catalogTest.price,
         });
       } else {
-        console.warn(`⚠️  Test not found in catalog: "${rawTestName}" (normalized: "${normalizedName}")`);
+        console.warn(`⚠️  Test not found: "${rawTestName}" (normalized: "${normalizedName}", hint: "${categoryHint}")`);
       }
     }
 
     // ── Calculate total with fees ─────────────────────────
-    const testTotal = resolvedTests
-      .reduce((sum, t) => sum + parseFloat(t.price), 0);
-
+    const testTotal = resolvedTests.reduce((sum, t) => sum + parseFloat(t.price), 0);
     const SAMPLE_COLLECTION_FEE = 15;
-
-    // Determine order type and validate
-    const orderType = (patient.orderType === "home_collection" ? "home_collection" : "walk_in") as "walk_in" | "home_collection";
-    const paymentMethod = (patient.paymentMethod === "at_counter" ? "at_counter" : patient.paymentMethod === "online" ? "online" : null) as "online" | "at_counter" | null;
-
-    // Validate: home collection requires patient address
-    if (orderType === "home_collection" && !patient.patientAddress) {
-      await db
-        .update(webhookLogs)
-        .set({ status: "failed", errorMessage: "Home collection orders require a patient address" })
-        .where(eq(webhookLogs.id, logEntry.id));
-      return c.json(error("Home collection orders require a patient address"), 400);
-    }
-
-    // Validate travel fee (only for home collection, must be $25–$50)
-    let travelFee = 0;
-    if (orderType === "home_collection") {
-      travelFee = patient.travelFee || 0;
-      if (travelFee > 0 && !(VALID_TRAVEL_FEES as readonly number[]).includes(travelFee)) {
-        await db
-          .update(webhookLogs)
-          .set({ status: "failed", errorMessage: `Invalid travel fee: $${travelFee}. Must be $25–$50 in $5 increments.` })
-          .where(eq(webhookLogs.id, logEntry.id));
-        return c.json(error(`Invalid travel fee: $${travelFee}`), 400);
-      }
-    }
-
+    // WordPress forms do not send a travel fee field; default to 0.
+    // Staff can update it manually in the dashboard after order creation.
+    const travelFee = 0;
     const totalAmount = (testTotal + SAMPLE_COLLECTION_FEE + travelFee).toFixed(2);
 
+    const { orderType, location, paymentMethod } = patient;
+
     // ── Insert order + items in a single transaction ──────
-    // Guarantees atomicity: either both succeed or both rollback.
     const order = await db.transaction(async (tx) => {
       const [newOrder] = await tx
         .insert(orders)
@@ -206,6 +199,13 @@ webhook.post("/metform", async (c) => {
           patientPhone: patient.patientPhone || null,
           patientSecondaryPhone: patient.patientSecondaryPhone,
           patientAddress: patient.patientAddress || null,
+          patientEmail: patient.patientEmail || null,
+          patientCity: patient.patientCity || null,
+          patientState: patient.patientState || null,
+          patientZipCode: patient.patientZipCode || null,
+          referralSource: patient.referralSource || null,
+          allergyInfo: patient.allergyInfo || null,
+          consentData: patient.consentData,
           physicianName: patient.physicianName || null,
           clinicAddress: patient.clinicAddress || null,
           scheduleDate: patient.scheduleDate || null,
@@ -213,6 +213,7 @@ webhook.post("/metform", async (c) => {
           dateOfOrder: patient.dateOfOrder || new Date().toISOString().slice(0, 10),
           formSlug,
           formName: form_name ? String(form_name) : null,
+          location,
           orderType,
           paymentMethod,
           paymentStatus: "pending",
@@ -220,6 +221,8 @@ webhook.post("/metform", async (c) => {
           travelFee: travelFee.toFixed(2),
           totalAmount,
           status: "pending",
+          signatureBase64: patient.signatureBase64,
+          drivingLicenseUrl: patient.drivingLicenseUrl,
           rawFormData: rawPayload,
         })
         .onConflictDoUpdate({
@@ -227,8 +230,18 @@ webhook.post("/metform", async (c) => {
           set: {
             patientName: patient.patientName || "Unknown Patient",
             patientPhone: patient.patientPhone || null,
-            physicianName: patient.physicianName || null,
-            clinicAddress: patient.clinicAddress || null,
+            patientEmail: patient.patientEmail || null,
+            patientCity: patient.patientCity || null,
+            patientState: patient.patientState || null,
+            patientZipCode: patient.patientZipCode || null,
+            referralSource: patient.referralSource || null,
+            allergyInfo: patient.allergyInfo || null,
+            consentData: patient.consentData,
+            location,
+            orderType,
+            paymentMethod,
+            signatureBase64: patient.signatureBase64,
+            drivingLicenseUrl: patient.drivingLicenseUrl,
             rawFormData: rawPayload,
             updatedAt: new Date(),
           },
@@ -265,7 +278,7 @@ webhook.post("/metform", async (c) => {
         id: order.id,
         orderNumber: order.orderNumber,
         testsMatched: resolvedTests.length,
-        testsSubmitted: patient.testNames.length,
+        testsSubmitted: patient.tests.length,
         totalAmount,
         message: "Order received successfully",
       }),
