@@ -371,10 +371,11 @@ ordersRoute.post(
       testTotal += parseFloat(catalogTest.price);
     }
 
-    // Fee calculation — use form-provided values
+    // Fee calculation — walk-in: collection fee only, in-house: travel fee only
     const orderType = data.orderType || "walk_in";
-    const collectionFee = data.sampleCollectionFee;
-    const travelFee = orderType === "home_collection" ? data.travelFee : 0;
+    const isHomeCollection = orderType === "home_collection";
+    const collectionFee = isHomeCollection ? 0 : data.sampleCollectionFee;
+    const travelFee = isHomeCollection ? data.travelFee : 0;
 
     if (orderType === "home_collection" && !data.patientAddress) {
       return c.json(error("Home collection orders require a patient address"), 400);

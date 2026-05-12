@@ -178,12 +178,16 @@ webhook.post("/metform", async (c) => {
     }
 
     // ── Calculate total with fees ─────────────────────────
-    // Use form-provided fees when present, fall back to defaults
-    // for backward compatibility with older form payloads.
+    // Walk-in forms → collection fee only (from mf-collection-fees)
+    // In-house forms → travel fee only (from mf-travel-fees)
+    // There is NO collection fee on in-house, NO travel fee on walk-in.
     const testTotal = resolvedTests.reduce((sum, t) => sum + parseFloat(t.price), 0);
-    const collectionFee = patient.collectionFee ?? 15;
-    const travelFeeAmount = patient.travelFeeData?.amount ?? 0;
-    const isTravelFeeOutOfRange = patient.travelFeeData?.outOfRange ?? false;
+
+    const isHomeCollection = patient.orderType === "home_collection";
+    const collectionFee = isHomeCollection ? 0 : (patient.collectionFee ?? 0);
+    const travelFeeAmount = isHomeCollection ? (patient.travelFeeData?.amount ?? 0) : 0;
+    const isTravelFeeOutOfRange = isHomeCollection && (patient.travelFeeData?.outOfRange ?? false);
+
     const totalAmount = (testTotal + collectionFee + travelFeeAmount).toFixed(2);
 
     // Flag out-of-range travel fees so staff can handle manually

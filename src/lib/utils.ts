@@ -208,20 +208,29 @@ export function extractPatientFields(
   // ── Fees from WordPress ────────────────────────────────
   // Walk-in forms send mf-collection-fees (numeric or "0.00")
   // In-house forms send mf-travel-fees (numeric, "0.00", or "out of range")
-  const collectionFeeRaw = find(["mf-collection-fees"]);
+  //
+  // IMPORTANT: Do NOT use find() here — it rejects non-string and falsy
+  // values (e.g. the number 0). WordPress Metform can send fees as either
+  // a string "0.00" or a bare number 0. We must handle both.
+  const collectionFeeRaw = formData["mf-collection-fees"];
   let collectionFee: number | null = null;
-  if (collectionFeeRaw !== null) {
-    const parsed = parseFloat(collectionFeeRaw);
+  if (collectionFeeRaw !== undefined && collectionFeeRaw !== null) {
+    const parsed = typeof collectionFeeRaw === "number"
+      ? collectionFeeRaw
+      : parseFloat(String(collectionFeeRaw));
     collectionFee = isNaN(parsed) ? null : parsed;
   }
 
-  const travelFeeRaw = find(["mf-travel-fees"]);
+  const travelFeeRaw = formData["mf-travel-fees"];
   let travelFeeData: { amount: number; outOfRange: boolean } | null = null;
-  if (travelFeeRaw !== null) {
-    if (travelFeeRaw.toLowerCase().includes("out of range")) {
+  if (travelFeeRaw !== undefined && travelFeeRaw !== null) {
+    const strVal = String(travelFeeRaw).trim().toLowerCase();
+    if (strVal.includes("out of range")) {
       travelFeeData = { amount: 0, outOfRange: true };
     } else {
-      const parsed = parseFloat(travelFeeRaw);
+      const parsed = typeof travelFeeRaw === "number"
+        ? travelFeeRaw
+        : parseFloat(String(travelFeeRaw));
       travelFeeData = { amount: isNaN(parsed) ? 0 : parsed, outOfRange: false };
     }
   }
