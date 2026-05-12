@@ -247,6 +247,72 @@ ordersRoute.get(
   }
 );
 
+// ─── GET /orders/:id/license — proxy the WP-hosted driving license ──
+// WordPress media on wellhealthlabs.com doesn't send CORS headers, so the
+// dashboard can't fetch it directly to embed in PDFs. We fetch server-side
+// and stream the bytes back. Auth is enforced by the route-group middleware;
+// SSRF is mitigated by the ALLOWED_LICENSE_HOSTS allowlist.
+
+ordersRoute.get("/:id/license", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  if (isNaN(id)) return c.json(error("Invalid order ID"), 400);
+
+  const order = await db.query.orders.findFirst({
+    where: eq(orders.id, id),
+    columns: { drivingLicenseUrl: true },
+  });
+
+  if (!order || !order.drivingLicenseUrl) {
+    return c.json(error("No driving license on file for this order"), 404);
+  }
+
+  let licenseUrl: URL;
+  try {
+    licenseUrl = new URL(order.drivingLicenseUrl);
+  } catch {
+    return c.json(error("Stored license URL is malformed"), 400);
+  }
+
+  if (licenseUrl.protocol !== "http:" && licenseUrl.protocol !== "https:") {
+    return c.json(error("License URL must be http(s)"), 400);
+  }
+
+  const allowed = (process.env.ALLOWED_LICENSE_HOSTS || "wellhealthlabs.com")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  const host = licenseUrl.hostname.toLowerCase();
+  const allowedHost = allowed.some(
+    (h) => host === h || host.endsWith(`.${h}`)
+  );
+  if (!allowedHost) {
+    return c.json(error("License host not on allowlist"), 403);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(order.drivingLicenseUrl);
+  } catch (err) {
+    console.error("License proxy fetch failed:", err);
+    return c.json(error("Failed to fetch license from upstream"), 502);
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    return c.json(error(`Upstream returned ${upstream.status}`), 502);
+  }
+
+  const fileName = decodeURIComponent(
+    licenseUrl.pathname.split("/").pop() || "license"
+  );
+  const contentType =
+    upstream.headers.get("content-type") || "application/octet-stream";
+
+  c.header("Content-Type", contentType);
+  c.header("Content-Disposition", `inline; filename="${fileName}"`);
+  c.header("Cache-Control", "private, max-age=300");
+  return c.body(upstream.body);
+});
+
 // ─── GET /orders/:id — single order with full details ────
 
 ordersRoute.get("/:id", async (c) => {
