@@ -205,6 +205,27 @@ export function extractPatientFields(
     paymentMethod = "online";
   }
 
+  // ── Fees from WordPress ────────────────────────────────
+  // Walk-in forms send mf-collection-fees (numeric or "0.00")
+  // In-house forms send mf-travel-fees (numeric, "0.00", or "out of range")
+  const collectionFeeRaw = find(["mf-collection-fees"]);
+  let collectionFee: number | null = null;
+  if (collectionFeeRaw !== null) {
+    const parsed = parseFloat(collectionFeeRaw);
+    collectionFee = isNaN(parsed) ? null : parsed;
+  }
+
+  const travelFeeRaw = find(["mf-travel-fees"]);
+  let travelFeeData: { amount: number; outOfRange: boolean } | null = null;
+  if (travelFeeRaw !== null) {
+    if (travelFeeRaw.toLowerCase().includes("out of range")) {
+      travelFeeData = { amount: 0, outOfRange: true };
+    } else {
+      const parsed = parseFloat(travelFeeRaw);
+      travelFeeData = { amount: isNaN(parsed) ? 0 : parsed, outOfRange: false };
+    }
+  }
+
   // ── Signature ─────────────────────────────────────────
   // Present on all 4 form types. Large base64 PNG string.
   const signatureBase64 = find(["mf-signature-customer-or-legal-guardian"]) || null;
@@ -245,6 +266,8 @@ export function extractPatientFields(
     location,
     orderType,
     paymentMethod,
+    collectionFee,
+    travelFeeData,
     signatureBase64,
     drivingLicenseUrl,
   };

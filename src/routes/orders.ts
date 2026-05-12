@@ -9,7 +9,6 @@ import {
   orderFilterSchema,
   scheduleQuerySchema,
   VALID_TIME_SLOTS,
-  VALID_TRAVEL_FEES,
 } from "../lib/types";
 import { success, error, generateOrderNumber } from "../lib/utils";
 import { authMiddleware } from "../middleware/auth";
@@ -372,22 +371,16 @@ ordersRoute.post(
       testTotal += parseFloat(catalogTest.price);
     }
 
-    // Fee calculation
-    const SAMPLE_COLLECTION_FEE = 15;
+    // Fee calculation — use form-provided values
     const orderType = data.orderType || "walk_in";
-    let travelFee = 0;
+    const collectionFee = data.sampleCollectionFee;
+    const travelFee = orderType === "home_collection" ? data.travelFee : 0;
 
-    if (orderType === "home_collection") {
-      travelFee = data.travelFee || 0;
-      if (travelFee > 0 && !(VALID_TRAVEL_FEES as readonly number[]).includes(travelFee)) {
-        return c.json(error(`Invalid travel fee: $${travelFee}. Must be $25–$50 in $5 increments.`), 400);
-      }
-      if (!data.patientAddress) {
-        return c.json(error("Home collection orders require a patient address"), 400);
-      }
+    if (orderType === "home_collection" && !data.patientAddress) {
+      return c.json(error("Home collection orders require a patient address"), 400);
     }
 
-    const totalAmount = (testTotal + SAMPLE_COLLECTION_FEE + travelFee).toFixed(2);
+    const totalAmount = (testTotal + collectionFee + travelFee).toFixed(2);
 
     const [order] = await db
       .insert(orders)
@@ -405,7 +398,7 @@ ordersRoute.post(
         orderType,
         paymentMethod: data.paymentMethod || null,
         paymentStatus: "pending",
-        sampleCollectionFee: SAMPLE_COLLECTION_FEE.toFixed(2),
+        sampleCollectionFee: collectionFee.toFixed(2),
         travelFee: travelFee.toFixed(2),
         totalAmount,
         status: "pending",

@@ -178,12 +178,18 @@ webhook.post("/metform", async (c) => {
     }
 
     // ── Calculate total with fees ─────────────────────────
+    // Use form-provided fees when present, fall back to defaults
+    // for backward compatibility with older form payloads.
     const testTotal = resolvedTests.reduce((sum, t) => sum + parseFloat(t.price), 0);
-    const SAMPLE_COLLECTION_FEE = 15;
-    // WordPress forms do not send a travel fee field; default to 0.
-    // Staff can update it manually in the dashboard after order creation.
-    const travelFee = 0;
-    const totalAmount = (testTotal + SAMPLE_COLLECTION_FEE + travelFee).toFixed(2);
+    const collectionFee = patient.collectionFee ?? 15;
+    const travelFeeAmount = patient.travelFeeData?.amount ?? 0;
+    const isTravelFeeOutOfRange = patient.travelFeeData?.outOfRange ?? false;
+    const totalAmount = (testTotal + collectionFee + travelFeeAmount).toFixed(2);
+
+    // Flag out-of-range travel fees so staff can handle manually
+    const outOfRangeNote = isTravelFeeOutOfRange
+      ? "⚠️ TRAVEL FEE OUT OF RANGE — This patient's address is outside the standard service area. Travel fee requires manual review."
+      : null;
 
     const { orderType, location, paymentMethod } = patient;
 
@@ -217,10 +223,11 @@ webhook.post("/metform", async (c) => {
           orderType,
           paymentMethod,
           paymentStatus: "pending",
-          sampleCollectionFee: SAMPLE_COLLECTION_FEE.toFixed(2),
-          travelFee: travelFee.toFixed(2),
+          sampleCollectionFee: collectionFee.toFixed(2),
+          travelFee: travelFeeAmount.toFixed(2),
           totalAmount,
           status: "pending",
+          notes: outOfRangeNote,
           signatureBase64: patient.signatureBase64,
           drivingLicenseUrl: patient.drivingLicenseUrl,
           rawFormData: rawPayload,
@@ -240,6 +247,10 @@ webhook.post("/metform", async (c) => {
             location,
             orderType,
             paymentMethod,
+            sampleCollectionFee: collectionFee.toFixed(2),
+            travelFee: travelFeeAmount.toFixed(2),
+            totalAmount,
+            notes: outOfRangeNote,
             signatureBase64: patient.signatureBase64,
             drivingLicenseUrl: patient.drivingLicenseUrl,
             rawFormData: rawPayload,
