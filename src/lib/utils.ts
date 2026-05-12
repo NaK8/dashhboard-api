@@ -240,7 +240,8 @@ export function extractPatientFields(
   const signatureBase64 = find(["mf-signature-customer-or-legal-guardian"]) || null;
 
   // ── Driving license URL ───────────────────────────────
-  // Present on in-house forms only. Arrives via file_uploads.
+  // Present on in-house (home_collection) forms only. Arrives via file_uploads.
+  // WordPress sends an array of upload descriptors; we take the first.
   let drivingLicenseUrl: string | null = null;
   if (fileUploads && typeof fileUploads === "object") {
     const uploads = fileUploads as Record<string, unknown>;
